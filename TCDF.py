@@ -1,8 +1,10 @@
+
+from .model import ADDSTCN
+
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
-from model import ADDSTCN
 import random
 import pandas as pd
 import numpy as np
@@ -19,7 +21,7 @@ def preparedata(file, target):
     df_yshift = df_y.copy(deep=True).shift(periods=1, axis=0)
     df_yshift[target]=df_yshift[target].fillna(0.)
     df_x[target] = df_yshift
-    data_x = df_x.values.astype('float32').transpose()    
+    data_x = df_x.values.astype('float32').transpose()
     data_y = df_y.values.astype('float32').transpose()
     data_x = torch.from_numpy(data_x)
     data_y = torch.from_numpy(data_y)
@@ -33,13 +35,13 @@ def train(epoch, traindata, traintarget, modelname, optimizer,log_interval,epoch
 
     modelname.train()
     x, y = traindata[0:1], traintarget[0:1]
-        
+
     optimizer.zero_grad()
     epochpercentage = (epoch/float(epochs))*100
     output = modelname(x)
 
     attentionscores = modelname.fs_attention
-    
+
     loss = F.mse_loss(output, y)
     loss.backward()
     optimizer.step()
@@ -49,38 +51,38 @@ def train(epoch, traindata, traintarget, modelname, optimizer,log_interval,epoch
 
     return attentionscores.data, loss
 
-def findcauses(target, cuda, epochs, kernel_size, layers, 
+def findcauses(target, cuda, epochs, kernel_size, layers,
                log_interval, lr, optimizername, seed, dilation_c, significance, file):
     """Discovers potential causes of one target time series, validates these potential causes with PIVM and discovers the corresponding time delays"""
 
     print("\n", "Analysis started for target: ", target)
     torch.manual_seed(seed)
-    
+
     X_train, Y_train = preparedata(file, target)
     X_train = X_train.unsqueeze(0).contiguous()
     Y_train = Y_train.unsqueeze(2).contiguous()
 
     input_channels = X_train.size()[1]
-       
+
     targetidx = pd.read_csv(file).columns.get_loc(target)
-          
+
     model = ADDSTCN(targetidx, input_channels, layers, kernel_size=kernel_size, cuda=cuda, dilation_c=dilation_c)
     if cuda:
         model.cuda()
         X_train = X_train.cuda()
         Y_train = Y_train.cuda()
 
-    optimizer = getattr(optim, optimizername)(model.parameters(), lr=lr)    
-    
+    optimizer = getattr(optim, optimizername)(model.parameters(), lr=lr)
+
     scores, firstloss = train(1, X_train, Y_train, model, optimizer,log_interval,epochs)
     firstloss = firstloss.cpu().data.item()
     for ep in range(2, epochs+1):
         scores, realloss = train(ep, X_train, Y_train, model, optimizer,log_interval,epochs)
     realloss = realloss.cpu().data.item()
-    
+
     s = sorted(scores.view(-1).cpu().detach().numpy(), reverse=True)
     indices = np.argsort(-1 *scores.view(-1).cpu().detach().numpy())
-    
+
     #attention interpretation to find tau: the threshold that distinguishes potential causes from non-causal time series
     if len(s)<=5:
         potentials = []
@@ -96,22 +98,22 @@ def findcauses(target, cuda, epochs, kernel_size, layers,
             gap = s[i]-s[i+1]
             gaps.append(gap)
         sortgaps = sorted(gaps, reverse=True)
-        
+
+        ind = -1
         for i in range(0, len(gaps)):
             largestgap = sortgaps[i]
             index = gaps.index(largestgap)
-            ind = -1
             if index<((len(s)-1)/2): #gap should be in first half
                 if index>0:
                     ind=index #gap should have index > 0, except if second score <1
                     break
         if ind<0:
             ind = 0
-                
+
         potentials = indices[:ind+1].tolist()
     print("Potential causes: ", potentials)
     validated = copy.deepcopy(potentials)
-    
+
     #Apply PIVM (permutes the values) to check if potential cause is true cause
     for idx in potentials:
         random.seed(seed)
@@ -124,24 +126,24 @@ def findcauses(target, cuda, epochs, kernel_size, layers,
         output = model(shuffled)
         testloss = F.mse_loss(output, Y_train)
         testloss = testloss.cpu().data.item()
-        
+
         diff = firstloss-realloss
         testdiff = firstloss-testloss
 
-        if testdiff>(diff*significance): 
-            validated.remove(idx) 
-    
- 
+        if testdiff>(diff*significance):
+            validated.remove(idx)
+
+
     weights = []
-    
+
     #Discover time delay between cause and effect by interpreting kernel weights
     for layer in range(layers):
         weight = model.dwn.network[layer].net[0].weight.abs().view(model.dwn.network[layer].net[0].weight.size()[0], model.dwn.network[layer].net[0].weight.size()[2])
         weights.append(weight)
 
-    causeswithdelay = dict()    
-    for v in validated: 
-        totaldelay=0    
+    causeswithdelay = dict()
+    for v in validated:
+        totaldelay=0
         for k in range(len(weights)):
             w=weights[k]
             row = w[v]
@@ -160,10 +162,5 @@ def findcauses(target, cuda, epochs, kernel_size, layers,
         else:
             causeswithdelay[(targetidx, v)]=totaldelay+1
     print("Validated causes: ", validated)
-    
+
     return validated, causeswithdelay, realloss, scores.view(-1).cpu().detach().numpy().tolist()
-
-
-
-
-
