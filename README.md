@@ -1,5 +1,5 @@
 # Fork Changelist
-This fork contains a number of changes to the TCDF framework as part of a larger piece of research work (https://github.com/cognitive-robots/autonomous_driving_observation_based_causal_discovery). The following is a brief summary of these changes:
+This fork contains a number of changes to the TCDF framework as part of a larger piece of research work (see https://github.com/cognitive-robots/autonomous_driving_observation_based_causal_discovery). The following is a brief summary of these changes:
 * Restructured the code to better work as an import for other parts of the project.
 * Added ability for the main script to output the discovered causal model in a custom JSON format.
 * Fixed a bug where scores under 1.0 during training would result in a crash.
